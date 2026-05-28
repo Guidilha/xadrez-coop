@@ -77,6 +77,7 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   Widget build(BuildContext context) {
     // SE NÃO TEM 2 JOGADORES, MOSTRA A TELA DE ESPERA
     if (playerCount < 2) {
+      List<String> casasVisuais = gerarListaDoTabuleiro();
       return Scaffold(
         appBar: AppBar(title: const Text('Lobby de Espera')),
         body: Center(
@@ -99,8 +100,7 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       );
     }
 
-    // SE TEM 2 JOGADORES, RENDERIZA O TABULEIRO NORMALMENTE
-    List<String> casasVisuais = gerarListaDoTabuleiro();
+    
     
     return Scaffold(
       appBar: AppBar(title: Text("Turno: $turnoAtual | Sala: ${widget.roomCode}")),
