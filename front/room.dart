@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math'; // Para gerar o código aleatório
 import 'gamescreen.dart'; // Importe a tela do jogo
 
 class JoinRoomScreen extends StatefulWidget {
@@ -9,56 +10,86 @@ class JoinRoomScreen extends StatefulWidget {
 }
 
 class _JoinRoomScreenState extends State<JoinRoomScreen> {
-  final TextEditingController _codeController = TextEditingController();
+  // TODO: No futuro, você vai preencher essa lista fazendo uma requisição HTTP (GET) para o seu servidor Go!
+  // Por enquanto, usamos dados simulados para desenhar a tela.
+  List<Map<String, dynamic>> _salasDisponiveis = [
+    {'id': 'AB49', 'nome': 'Partida do João', 'jogadores': 1},
+    {'id': 'X7Y2', 'nome': 'Sala para iniciantes', 'jogadores': 1},
+    {'id': 'M9K1', 'nome': 'Revanche!', 'jogadores': 1},
+  ];
 
-  void _entrarNaSala() {
-    final codigo = _codeController.text.trim().toUpperCase(); // Força maiúsculo
-    if (codigo.isNotEmpty) {
-      Navigator.pushReplacement(
-        context,
-        // Passa o código que o usuário digitou
-        MaterialPageRoute(builder: (context) => ChessBoardScreen(roomCode: codigo)), 
-      );
-    }
+  // Função para entrar em uma sala existente
+  void _entrarNaSala(String codigoSala) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChessBoardScreen(roomCode: codigoSala),
+      ),
+    );
+  }
+
+  // Função para criar uma nova sala
+  void _criarNovaSala() {
+    // Gera um código aleatório de 4 letras/números
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final random = Random();
+    String novoCodigo = String.fromCharCodes(Iterable.generate(
+        4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
+
+    // Entra direto na nova sala (o Go vai criar a sala quando bater no WebSocket)
+    _entrarNaSala(novoCodigo);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Entrar em uma Sala')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.search, size: 80, color: Colors.blue),
-            const SizedBox(height: 24),
-            const Text(
-              'Digite o código da sala do seu amigo:',
-              style: TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _codeController,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 24, letterSpacing: 2),
-              decoration: const InputDecoration(
-                hintText: 'EX: AB49',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: _entrarNaSala,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                child: const Text('Conectar e Jogar', style: TextStyle(fontSize: 18)),
+      appBar: AppBar(
+        title: const Text('Lobby de Salas'),
+        centerTitle: true,
+      ),
+      body: _salasDisponiveis.isEmpty
+          ? const Center(
+              child: Text(
+                'Nenhuma sala disponível no momento.\nCrie a sua!',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
             )
-          ],
-        ),
+          : ListView.builder(
+              padding: const EdgeInsets.all(16.0),
+              itemCount: _salasDisponiveis.length,
+              itemBuilder: (context, index) {
+                final sala = _salasDisponiveis[index];
+                
+                return Card(
+                  elevation: 2,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: const Icon(Icons.videogame_asset, color: Colors.blue, size: 36),
+                    title: Text(
+                      sala['nome'],
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text('Código: ${sala['id']}  •  Jogadores: ${sala['jogadores']}/2'),
+                    trailing: ElevatedButton(
+                      onPressed: () => _entrarNaSala(sala['id']),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Entrar'),
+                    ),
+                  ),
+                );
+              },
+            ),
+      // Botão flutuante para criar a própria sala
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _criarNovaSala,
+        icon: const Icon(Icons.add),
+        label: const Text('Criar Sala'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
       ),
     );
   }
