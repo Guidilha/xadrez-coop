@@ -38,7 +38,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Aguardando alguém escolher sua partida na lista...',
+                'Aguardando...',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
@@ -90,13 +90,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   child: const Text('Iniciar Partida', style: TextStyle(fontSize: 18)),
                 ),
               ),
-              
-              // Botão Dev oculto (Remover depois que o WebSocket estiver pronto)
-              const SizedBox(height: 20),
-              TextButton(
-                onPressed: () => setState(() => _oponenteConectado = true),
-                child: const Text('(Dev) Simular entrada de oponente', style: TextStyle(color: Colors.grey)),
-              )
             ],
           ),
         ),
