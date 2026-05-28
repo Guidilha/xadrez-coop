@@ -384,14 +384,33 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
   }
  void _handleAction(String acao) {
     if (acao == 'criar') {
-      // Gera um código aleatório de 4 dígitos (ex: "8294")
-      String novoCodigo = Random().nextInt(9999).toString().padLeft(4, '0');
-      
+      // Gera um código aleatório alfanumérico para a sala (invisível para o usuário)
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      final random = Random();
+      String novoCodigo = String.fromCharCodes(Iterable.generate(
+          4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
+
+      // Descobre qual modo de jogo está selecionado para mostrar no Lobby
+      String nomeDoModo;
+      switch (_selectedMode) {
+        case GameMode.umContraUm: nomeDoModo = '1v1'; break;
+        case GameMode.doisContraDois: nomeDoModo = '2v2'; break;
+        case GameMode.tresContraTres: nomeDoModo = '3v3'; break;
+        case GameMode.contraIA: nomeDoModo = 'VS IA'; break;
+      }
+
+      // Agora vai para o Lobby de Espera aguardar alguém da lista conectar!
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => ChessBoardScreen(roomCode: novoCodigo)),
+        MaterialPageRoute(
+          builder: (context) => LobbyScreen(
+            modoDeJogo: nomeDoModo,
+            roomID: novoCodigo,
+          ),
+        ),
       );
     } else if (acao == 'entrar') {
+      // Abre o "Server Browser" (lista de salas públicas)
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const JoinRoomScreen()),
