@@ -12,12 +12,8 @@ class JoinRoomScreen extends StatefulWidget {
 class _JoinRoomScreenState extends State<JoinRoomScreen> {
   // TODO: No futuro, você vai preencher essa lista fazendo uma requisição HTTP (GET) para o seu servidor Go!
   // Por enquanto, usamos dados simulados para desenhar a tela.
-  List<Map<String, dynamic>> _salasDisponiveis = [
-    {'id': 'AB49', 'nome': 'Partida do João', 'jogadores': 1},
-    {'id': 'X7Y2', 'nome': 'Sala para iniciantes', 'jogadores': 1},
-    {'id': 'M9K1', 'nome': 'Revanche!', 'jogadores': 1},
-  ];
-
+  List<Map<String, dynamic>> _salasDisponiveis = [];
+  bool _isLoading = true;
   // Função para entrar em uma sala existente
   void _entrarNaSala(String codigoSala) {
     Navigator.pushReplacement(
