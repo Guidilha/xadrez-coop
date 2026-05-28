@@ -23,8 +23,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   void initState() {
     super.initState();
     _channel = WebSocketChannel.connect(
-      Uri.parse('ws://localhost:8080/ws/play?room=${widget.roomCode}')
-    );
+      Uri.parse('wss://xadrez-a8qm.onrender.com/ws/play?room=${widget.roomCode}')
+    ); 
     
     _channel.stream.listen((message) {
       final data = jsonDecode(message);

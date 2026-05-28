@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'gamescreen.dart';
-import 'lobby_screen.dart';
+//import 'lobby_screen.dart';
 import 'room.dart';
 import 'dart:math';
 
@@ -333,13 +333,7 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
   }
 
   Widget _buildHistoryTab() {
-    final List<Map<String, dynamic>> historico = [
-      {'modo': '1v1', 'resultado': 'Vitória', 'elo': '+15', 'data': 'Hoje, 14:30', 'win': true},
-      {'modo': 'VS IA', 'resultado': 'Derrota', 'elo': '-10', 'data': 'Ontem, 20:15', 'win': false},
-      {'modo': '2v2', 'resultado': 'Vitória', 'elo': '+12', 'data': '15 de Maio', 'win': true},
-      {'modo': '1v1', 'resultado': 'Empate', 'elo': '+0', 'data': '14 de Maio', 'win': null},
-      {'modo': '3v3', 'resultado': 'Derrota', 'elo': '-14', 'data': '10 de Maio', 'win': false},
-    ];
+    final List<Map<String, dynamic>> historico = [];
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -403,9 +397,9 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => LobbyScreen(
-            modoDeJogo: nomeDoModo,
-            roomID: novoCodigo,
+          builder: (context) => ChessBoardScreen(
+            //modoDeJogo: nomeDoModo,
+            roomCode: novoCodigo,
           ),
         ),
       );
