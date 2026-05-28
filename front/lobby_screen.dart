@@ -3,15 +3,20 @@ import 'gamescreen.dart';
 
 class LobbyScreen extends StatefulWidget {
   final String modoDeJogo;
-  const LobbyScreen({super.key, required this.modoDeJogo});
+  // O código continua aqui para o sistema funcionar, mas o usuário não vai ver!
+  final String roomID; 
+
+  const LobbyScreen({
+    super.key, 
+    required this.modoDeJogo, 
+    required this.roomID, 
+  });
 
   @override
   State<LobbyScreen> createState() => _LobbyScreenState();
 }
 
 class _LobbyScreenState extends State<LobbyScreen> {
-  // Simulando o estado da sala
-  final String codigoDaSala = "X7B9"; // O Go vai gerar isso no futuro
   bool _oponenteConectado = false; // Muda para true quando o socket avisar
 
   @override
@@ -24,10 +29,18 @@ class _LobbyScreenState extends State<LobbyScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text('Código da sua sala:', style: TextStyle(fontSize: 16)),
-              Text(
-                codigoDaSala,
-                style: const TextStyle(fontSize: 48, fontWeight: FontWeight.bold, letterSpacing: 5, color: Colors.blue),
+              // Substituímos o código gigante por um ícone de radar/procura
+              const Icon(Icons.radar, size: 80, color: Colors.blue),
+              const SizedBox(height: 24),
+              const Text(
+                'Sua sala está pública!',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Aguardando alguém escolher sua partida na lista...',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const SizedBox(height: 40),
               
@@ -48,8 +61,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   backgroundColor: _oponenteConectado ? Colors.red : Colors.grey, 
                   child: const Icon(Icons.person_outline, color: Colors.white)
                 ),
-                title: Text(_oponenteConectado ? 'Adversário Conectado!' : 'Aguardando oponente...'),
-                subtitle: Text(_oponenteConectado ? 'Pronto para iniciar' : 'Compartilhe o código acima'),
+                title: Text(_oponenteConectado ? 'Adversário Encontrado!' : 'Buscando oponente...'),
+                subtitle: Text(_oponenteConectado ? 'Pronto para iniciar' : 'Aguardando conexão'),
                 trailing: _oponenteConectado 
                     ? const Icon(Icons.check_circle, color: Colors.green)
                     : const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -59,7 +72,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               
               const SizedBox(height: 40),
               
-              // Botão de Iniciar (Só funciona se o oponente entrar)
+              // Botão de Iniciar
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -67,8 +80,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 onPressed: _oponenteConectado ? () {
                     Navigator.pushReplacement(
                         context,
-                        // Remova o "const" antes de ChessBoardScreen e passe a variável
-                        MaterialPageRoute(builder: (context) => ChessBoardScreen(roomCode: codigoDaSala)), 
+                        MaterialPageRoute(
+                          // Repassamos o ID oculto para o tabuleiro funcionar
+                          builder: (context) => ChessBoardScreen(roomCode: widget.roomID), 
+                        ), 
                       );
                     } : null,
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
@@ -76,10 +91,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
                 ),
               ),
               
-              // Botão temporário só para você testar a mudança de estado na UI
+              // Botão Dev oculto (Remover depois que o WebSocket estiver pronto)
+              const SizedBox(height: 20),
               TextButton(
                 onPressed: () => setState(() => _oponenteConectado = true),
-                child: const Text('(Dev) Simular entrada de oponente'),
+                child: const Text('(Dev) Simular entrada de oponente', style: TextStyle(color: Colors.grey)),
               )
             ],
           ),
