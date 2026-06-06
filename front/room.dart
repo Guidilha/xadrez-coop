@@ -5,7 +5,9 @@ import 'dart:convert'; // IMPORTANTE: Para ler o JSON do servidor
 import 'gamescreen.dart'; // Importe a tela do jogo
 
 class JoinRoomScreen extends StatefulWidget {
-  const JoinRoomScreen({super.key});
+  final String username;
+  final String mode;
+  const JoinRoomScreen({super.key, required this.username, required this.mode});
 
   @override
   State<JoinRoomScreen> createState() => _JoinRoomScreenState();
@@ -22,7 +24,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
   }
 
   // Função que conecta no seu backend Go (Render)
-  Future<void> _buscarSalas() async {
+Future<void> _buscarSalas() async {
     try {
       final response = await http.get(Uri.parse('https://xadrez-a8qm.onrender.com/api/rooms'));
 
@@ -33,7 +35,8 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
           _salasDisponiveis = dadosJson.map((sala) => {
             'id': sala['id'].toString(),
             'nome': sala['nome'].toString(),
-            'jogadores': sala['jogadores'],
+            'jogadores': "${sala['jogadores']}/${sala['max']}", // Mostra 1/2 ou 2/4
+            'mode': sala['mode'].toString(), // Lê o modo do servidor
           }).toList();
           _isLoading = false; // Tira a bolinha de carregamento
         });
@@ -46,12 +49,16 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
     }
   }
 
-  // Função para entrar em uma sala existente
-  void _entrarNaSala(String codigoSala) {
+  // 👉 ATUALIZADO: Agora a função exige receber o modo da sala!
+  void _entrarNaSala(String codigoSala, String modoDaSala) {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => ChessBoardScreen(roomCode: codigoSala),
+        builder: (context) => ChessBoardScreen(
+          roomCode: codigoSala,
+          username: widget.username, 
+          mode: modoDaSala, // 👉 REPASSAMOS O MODO PARA O TABULEIRO AQUI
+        ),
       ),
     );
   }
@@ -64,7 +71,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
         4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
 
     // Entra direto na nova sala (o Go vai criar a sala quando bater no WebSocket)
-    _entrarNaSala(novoCodigo);
+    _entrarNaSala(novoCodigo, widget.mode);
   }
 
   @override
@@ -110,9 +117,11 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
                           sala['nome'],
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        subtitle: Text('Código: ${sala['id']}  •  Jogadores: ${sala['jogadores']}/2'),
+                        // 👉 ATUALIZADO: Mostra as vagas dinâmicas e o modo!
+                        subtitle: Text('Código: ${sala['id']}  •  Jogadores: ${sala['jogadores']}  •  ${sala['mode']}'),
                         trailing: ElevatedButton(
-                          onPressed: () => _entrarNaSala(sala['id']),
+                          // 👉 ATUALIZADO: Envia o ID e o Modo para a função!
+                          onPressed: () => _entrarNaSala(sala['id'], sala['mode']),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
                             foregroundColor: Colors.white,

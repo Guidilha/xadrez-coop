@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'gamescreen.dart';
-//import 'lobby_screen.dart';
 import 'room.dart';
 import 'dart:math';
+import 'match_viewer.dart';	
 
 void main() {
   runApp(const MyApp());
@@ -24,7 +24,7 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const AuthScreen(),
-        '/dashboard': (context) => const MainMenuScreen(),
+        // A rota do dashboard foi removida daqui porque agora ela exige o 'username'
       },
     );
   }
@@ -85,7 +85,13 @@ class _AuthScreenState extends State<AuthScreen> {
 
       if (tipo == 'login') {
         if (mounted) {
-          Navigator.pushReplacementNamed(context, '/dashboard');
+          // 👉 AQUI A MÁGICA ACONTECE: O nome do login é enviado para o Menu!
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MainMenuScreen(username: username),
+            ),
+          );
         }
       } else {
         _mostrarMensagem('Cadastro realizado! Agora clique em Entrar.', true);
@@ -203,7 +209,10 @@ class _AuthScreenState extends State<AuthScreen> {
 enum GameMode { umContraUm, doisContraDois, tresContraTres, contraIA }
 
 class MainMenuScreen extends StatefulWidget {
-  const MainMenuScreen({super.key});
+  // 👉 1. O Menu agora exige receber o username
+  final String username;
+  
+  const MainMenuScreen({super.key, required this.username});
 
   @override
   State<MainMenuScreen> createState() => _MainMenuScreenState();
@@ -212,13 +221,38 @@ class MainMenuScreen extends StatefulWidget {
 class _MainMenuScreenState extends State<MainMenuScreen> {
   int _currentTab = 0;
   GameMode _selectedMode = GameMode.umContraUm;
+  
+  // Variáveis para guardar o histórico
+  List<Map<String, dynamic>> _historico = [];
+  bool _isLoadingHistory = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _buscarHistorico(); // Busca as partidas assim que logar
+  }
+
+  Future<void> _buscarHistorico() async {
+    try {
+      final response = await http.get(Uri.parse('https://xadrez-a8qm.onrender.com/api/history?user=${widget.username}'));
+      if (response.statusCode == 200) {
+        List<dynamic> dadosJson = jsonDecode(response.body);
+        setState(() {
+          _historico = dadosJson.map((p) => p as Map<String, dynamic>).toList();
+          _isLoadingHistory = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoadingHistory = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Xadrez Multiplayer', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text('Olá, ${widget.username}!', style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -226,16 +260,20 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sair',
-            onPressed: () {
-              Navigator.pushReplacementNamed(context, '/');
-            },
+            onPressed: () => Navigator.pushReplacementNamed(context, '/'),
           ),
         ],
       ),
       body: _currentTab == 0 ? _buildPlayTab() : _buildHistoryTab(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentTab,
-        onTap: (index) => setState(() => _currentTab = index),
+        onTap: (index) {
+          setState(() => _currentTab = index);
+          if (index == 1) {
+            setState(() => _isLoadingHistory = true);
+            _buscarHistorico(); // Atualiza o histórico ao clicar na aba
+          }
+        },
         selectedItemColor: Colors.blue,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.play_arrow), label: 'Jogar'),
@@ -309,7 +347,6 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
 
   Widget _buildModeSelector() {
     return Center(
-      // Envolvendo com SingleChildScrollView para evitar quebra de layout em telas menores
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: SegmentedButton<GameMode>(
@@ -324,7 +361,6 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
             setState(() => _selectedMode = selection.first);
           },
           style: ButtonStyle(
-            // Atualizado para WidgetStateProperty, que é o padrão atual do Flutter
             padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 12)),
           ),
         ),
@@ -333,42 +369,90 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
   }
 
   Widget _buildHistoryTab() {
-    final List<Map<String, dynamic>> historico = [];
+    if (_isLoadingHistory) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_historico.isEmpty) {
+      return const Center(
+        child: Text('Nenhuma partida encontrada.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+      );
+    }
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: historico.length,
+      itemCount: _historico.length,
       itemBuilder: (context, index) {
-        final partida = historico[index];
-        final bool? isWin = partida['win'];
+        final partida = _historico[index];
         
+        String status = partida['status'] ?? '*';
+        bool? isWin;
+        
+        if (status == '1-0') {
+          isWin = (partida['white_name'] == widget.username);
+        } else if (status == '0-1') {
+          isWin = (partida['black_name'] == widget.username);
+        } else if (status == '1/2-1/2') {
+          isWin = null; 
+        }
+
         Color iconColor = Colors.grey;
-        IconData iconData = Icons.remove_circle_outline;
-        
+        IconData iconData = Icons.schedule; 
+        String textoResultado = "Em Andamento";
+
         if (isWin == true) {
           iconColor = Colors.green;
           iconData = Icons.emoji_events;
+          textoResultado = "Vitória";
         } else if (isWin == false) {
           iconColor = Colors.red;
           iconData = Icons.cancel;
+          textoResultado = "Derrota";
+        } else if (status == '1/2-1/2') {
+          iconColor = Colors.orange;
+          iconData = Icons.handshake;
+          textoResultado = "Empate";
         }
 
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: iconColor.withOpacity(0.2),
-              child: Icon(iconData, color: iconColor),
-            ),
-            title: Text('Modo: ${partida['modo']} - ${partida['resultado']}'),
-            subtitle: Text(partida['data']),
-            trailing: Text(
-              partida['elo'],
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: isWin == true ? Colors.green : (isWin == false ? Colors.red : Colors.grey),
+        String adversario = (partida['white_name'] == widget.username) 
+            ? partida['black_name'] 
+            : partida['white_name'];
+
+        // 👉 AQUI ESTÁ O GESTURE DETECTOR ENVOLVENDO O CARD!
+        return GestureDetector(
+          onTap: () {
+            // Só abre o replay se a partida tiver lances salvos
+            List<String> lances = List<String>.from(partida['moves'] ?? []);
+            if (lances.isNotEmpty) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MatchViewerScreen(
+                    moves: lances,
+                    whiteName: partida['white_name'],
+                    blackName: partida['black_name'],
+                  ),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Esta partida não possui lances gravados.')),
+              );
+            }
+          },
+          child: Card(
+            elevation: 2,
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: iconColor.withOpacity(0.2),
+                child: Icon(iconData, color: iconColor),
+              ),
+              title: Text('VS $adversario', style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('Data: ${partida['date'] ?? "Hoje"}'),
+              trailing: Text(
+                textoResultado,
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: iconColor),
               ),
             ),
           ),
@@ -376,38 +460,36 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
       },
     );
   }
- void _handleAction(String acao) {
+  void _handleAction(String acao) {
+    String modoParaOGo = _selectedMode == GameMode.doisContraDois ? "2v2" : "1v1";		
     if (acao == 'criar') {
-      // Gera um código aleatório alfanumérico para a sala (invisível para o usuário)
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       final random = Random();
       String novoCodigo = String.fromCharCodes(Iterable.generate(
           4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
 
-      // Descobre qual modo de jogo está selecionado para mostrar no Lobby
-      String nomeDoModo;
-      switch (_selectedMode) {
-        case GameMode.umContraUm: nomeDoModo = '1v1'; break;
-        case GameMode.doisContraDois: nomeDoModo = '2v2'; break;
-        case GameMode.tresContraTres: nomeDoModo = '3v3'; break;
-        case GameMode.contraIA: nomeDoModo = 'VS IA'; break;
-      }
-
-      // Agora vai para o Lobby de Espera aguardar alguém da lista conectar!
+      // Transforma o Enum no texto que o Servidor Go espera
+      
+      
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChessBoardScreen(
-            //modoDeJogo: nomeDoModo,
             roomCode: novoCodigo,
+            username: widget.username,
+            mode: modoParaOGo,
           ),
         ),
       );
     } else if (acao == 'entrar') {
-      // Abre o "Server Browser" (lista de salas públicas)
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => const JoinRoomScreen()),
+        MaterialPageRoute(
+          builder: (context) => JoinRoomScreen(
+            username: widget.username,
+            mode: modoParaOGo,
+          ),
+        ),
       );
     }
   }
