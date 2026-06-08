@@ -22,6 +22,45 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
     super.initState();
     _buscarSalas(); // Dispara a busca assim que o jogador abre a tela
   }
+  
+  Future<void> _escolherEquipeEEntrar(BuildContext context, String codigo, String modo, String username) async {
+    String? equipeEscolhida = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Escolha sua Equipe', textAlign: TextAlign.center),
+        content: const Text('Em qual lado do tabuleiro você deseja jogar?', textAlign: TextAlign.center),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(context, 'w'), // Envia 'w' para o Go
+            child: const Text('Brancas', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black87, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(context, 'b'), // Envia 'b' para o Go
+            child: const Text('Pretas', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    // Se ele escolheu uma equipe e não apenas fechou a janela, abre a sala!
+    if (equipeEscolhida != null) {
+      if (!context.mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChessBoardScreen(
+            roomCode: codigo,
+            username: username,
+            mode: modo,
+            team: equipeEscolhida, // Repassa a escolha
+          ),
+        ),
+      );
+    }
+  }
 
   // Função que conecta no seu backend Go (Render)
 Future<void> _buscarSalas() async {
@@ -49,20 +88,6 @@ Future<void> _buscarSalas() async {
     }
   }
 
-  // 👉 ATUALIZADO: Agora a função exige receber o modo da sala!
-  void _entrarNaSala(String codigoSala, String modoDaSala) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChessBoardScreen(
-          roomCode: codigoSala,
-          username: widget.username, 
-          mode: modoDaSala, // 👉 REPASSAMOS O MODO PARA O TABULEIRO AQUI
-        ),
-      ),
-    );
-  }
-
   // Função para criar uma nova sala
   void _criarNovaSala() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -70,14 +95,16 @@ Future<void> _buscarSalas() async {
     String novoCodigo = String.fromCharCodes(Iterable.generate(
         4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
 
-    // Entra direto na nova sala (o Go vai criar a sala quando bater no WebSocket)
-    _entrarNaSala(novoCodigo, widget.mode);
+    // 👉 AGORA ELE ABRE O POP-UP EM VEZ DE PULAR DIRETO PRA SALA
+    _escolherEquipeEEntrar(context, novoCodigo, widget.mode, widget.username);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF161512),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF262421),
         title: const Text('Lobby de Salas'),
         centerTitle: true,
         actions: [
@@ -117,11 +144,9 @@ Future<void> _buscarSalas() async {
                           sala['nome'],
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        // 👉 ATUALIZADO: Mostra as vagas dinâmicas e o modo!
                         subtitle: Text('Código: ${sala['id']}  •  Jogadores: ${sala['jogadores']}  •  ${sala['mode']}'),
                         trailing: ElevatedButton(
-                          // 👉 ATUALIZADO: Envia o ID e o Modo para a função!
-                          onPressed: () => _entrarNaSala(sala['id'], sala['mode']),
+                          onPressed: () => _escolherEquipeEEntrar(context, sala['id'], sala['mode'], widget.username),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue,
                             foregroundColor: Colors.white,

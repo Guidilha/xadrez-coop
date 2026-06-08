@@ -85,7 +85,8 @@ class _MatchViewerScreenState extends State<MatchViewerScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Replay da Partida")),
+      backgroundColor: const Color(0xFF161512),
+      appBar: AppBar(backgroundColor: const Color(0xFF262421),title: const Text("Replay da Partida")),
       body: Column(
         children: [
           const SizedBox(height: 20),

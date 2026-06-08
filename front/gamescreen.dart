@@ -5,9 +5,10 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 class ChessBoardScreen extends StatefulWidget {
   final String roomCode;
   final String username; 
-  final String mode; // 👉 NOVO: Agora exige saber o modo!
+  final String mode; 
+  final String team; 
   
-  const ChessBoardScreen({super.key, required this.roomCode, required this.username, required this.mode});
+  const ChessBoardScreen({super.key, required this.roomCode, required this.username, required this.mode, required this.team});
 
   @override
   State<ChessBoardScreen> createState() => _ChessBoardScreenState();
@@ -23,25 +24,26 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   bool euPediRevanche = false; 
   int rematchVotes = 0;
   
-  // 👉 NOVAS VARIÁVEIS DE ESTADO MULTIPLAYER
   int playerCount = 0; 
   int maxPlayers = 2;
-  Map<String, dynamic> jogadoresConectados = {}; // Dicionário: { "w1": "Davi", "b2": "João" }
-  String activeRole = "w1"; // Quem deve jogar agora
-  String? myRole; // Minha cadeira (ex: "b1")
+  Map<String, dynamic> jogadoresConectados = {}; 
+  String? myRole; 
+
+  List<String> activeRoles = ['w1']; 
+  Map<String, dynamic> proposedMoves = {}; 
 
   @override
   void initState() {
     super.initState();
     _channel = WebSocketChannel.connect(
-      Uri.parse('wss://xadrez-a8qm.onrender.com/ws/play?room=${widget.roomCode}&user=${widget.username}&mode=${widget.mode}')
+      Uri.parse('wss://xadrez-a8qm.onrender.com/ws/play?room=${widget.roomCode}&user=${widget.username}&mode=${widget.mode}&team=${widget.team}')
     );
     
     _channel.stream.listen((message) {
       final data = jsonDecode(message);
       if (data['error'] != null) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sala cheia!')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'])));
         return;
       }
       
@@ -51,12 +53,12 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
         maxPlayers = data['max_players'] ?? 2;
         movimentosValidos = List<String>.from(data['valid_moves'] ?? []);
         rematchVotes = data['rematch_votes'] ?? 0;
-        
         jogadoresConectados = data['players'] ?? {};
-        activeRole = data['active_role'] ?? 'w1';
+        
+        activeRoles = List<String>.from(data['active_roles'] ?? ['w1']);
+        proposedMoves = data['proposed_moves'] ?? {};
         casaSelecionada = null; 
 
-        // Descobre em qual cadeira eu estou sentado
         if (myRole == null && jogadoresConectados.containsValue(widget.username)) {
           jogadoresConectados.forEach((cargo, nome) {
             if (nome == widget.username) myRole = cargo;
@@ -68,15 +70,11 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       if (status != '*') {
         if (!isDialogOpen) _mostrarFimDeJogo(status); 
         else {
-          Navigator.of(context).pop(); 
-          isDialogOpen = false;
+          Navigator.of(context).pop(); isDialogOpen = false;
           _mostrarFimDeJogo(status); 
         }
       } else {
-        if (isDialogOpen) {
-          Navigator.pop(context);
-          isDialogOpen = false;
-        }
+        if (isDialogOpen) { Navigator.pop(context); isDialogOpen = false; }
         euPediRevanche = false; 
       }
     });
@@ -87,8 +85,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     isDialogOpen = true;
 
     String mensagem = "O jogo terminou em empate!";
-    if (resultado == "1-0") mensagem = "Xeque-Mate!\nEquipe das Brancas Venceu!";
-    else if (resultado == "0-1") mensagem = "Xeque-Mate!\nEquipe das Pretas Venceu!";
+    if (resultado == "1-0") mensagem = "Xeque-Mate!\nAs Brancas Venceram!";
+    else if (resultado == "0-1") mensagem = "Xeque-Mate!\nAs Pretas Venceram!";
 
     Widget rematchWidget = euPediRevanche 
         ? const Text("Aguardando votos...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
@@ -105,17 +103,13 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       context: context,
       barrierDismissible: false, 
       builder: (context) => AlertDialog(
-        title: Text(
-          rematchVotes > 0 && !euPediRevanche ? "Adversário pediu revanche!" : "Fim de Jogo!", 
-          style: TextStyle(fontWeight: FontWeight.bold, color: rematchVotes > 0 ? Colors.green : Colors.black)
-        ),
+        title: const Text("Fim de Jogo!", style: TextStyle(fontWeight: FontWeight.bold)),
         content: Text(mensagem, style: const TextStyle(fontSize: 18), textAlign: TextAlign.center),
         actions: [
           rematchWidget,
           TextButton(
             onPressed: () {
-              Navigator.pop(context); Navigator.pop(context); 
-              isDialogOpen = false;
+              Navigator.pop(context); Navigator.pop(context); isDialogOpen = false;
             },
             child: const Text("Sair da Sala", style: TextStyle(color: Colors.red)),
           )
@@ -124,31 +118,40 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     );
   }
 
-  // 👉 FÁBRICA DE CARDS DINÂMICOS (Cuida do brilho/fade e cor da caixa)
   Widget _buildPlayerBadge(String roleID) {
     String name = jogadoresConectados[roleID] ?? "Aguardando...";
-    bool isMyTurn = (activeRole == roleID); // Brilha apenas se for a vez EXATA dele
     bool isMe = (myRole == roleID);
     bool isWhiteTeam = roleID.startsWith('w');
+    bool isActiveNow = activeRoles.contains(roleID);
+    bool jaVotou = proposedMoves[roleID] != null && proposedMoves[roleID] != "";
 
     return AnimatedOpacity(
-      opacity: isMyTurn ? 1.0 : 0.4,
+      opacity: isActiveNow ? 1.0 : 0.35,
       duration: const Duration(milliseconds: 300),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
         decoration: BoxDecoration(
-          color: isWhiteTeam ? Colors.grey[300] : Colors.black87,
+          color: isWhiteTeam ? Colors.grey[200] : Colors.grey[900],
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.black26),
-        ),
-        child: Text(
-          "$name ${isMe ? '(Você)' : ''}",
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: isWhiteTeam ? Colors.black87 : Colors.white,
+          border: Border.all(
+            color: isActiveNow ? (isWhiteTeam ? Colors.blue : Colors.cyan) : Colors.black12,
+            width: isActiveNow ? 2 : 1,
           ),
+          boxShadow: isActiveNow ? [BoxShadow(color: isWhiteTeam ? Colors.blue[200]! : Colors.black45, blurRadius: 4)] : [],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "$name ${isMe ? '(Vc)' : ''}",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isWhiteTeam ? Colors.black87 : Colors.white),
+            ),
+            if (jaVotou) ...[
+              const SizedBox(width: 4),
+              Icon(Icons.check_circle, size: 14, color: isWhiteTeam ? Colors.green[700] : Colors.green[400]),
+            ]
+          ],
         ),
       ),
     );
@@ -183,20 +186,15 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       case 'K': url = 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Chess_klt45.svg/120px-Chess_klt45.svg.png'; break;
       case 'P': url = 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/Chess_plt45.svg/120px-Chess_plt45.svg.png'; break;
     }
-    if (url.isEmpty) return const SizedBox();
     return Padding(padding: const EdgeInsets.all(4.0), child: Image.network(url, fit: BoxFit.contain));
   }
 
   Future<String?> _mostrarDialogoPromocao() async {
     bool isWhiteTeam = myRole != null && myRole!.startsWith('w');
-    String q = isWhiteTeam ? 'Q' : 'q';
-    String r = isWhiteTeam ? 'R' : 'r';
-    String b = isWhiteTeam ? 'B' : 'b';
-    String n = isWhiteTeam ? 'N' : 'n';
-
+    String q = isWhiteTeam ? 'Q' : 'q'; String r = isWhiteTeam ? 'R' : 'r';
+    String b = isWhiteTeam ? 'B' : 'b'; String n = isWhiteTeam ? 'N' : 'n';
     return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
+      context: context, barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text('Promover Peão'),
         content: Column(
@@ -213,8 +211,7 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   }
 
   void _aoClicarNaCasa(String nomeDaCasa) async {
-    // 👉 TRAVA: Só envia movimento se for o SEU turno exato (ex: w2)
-    if (myRole != activeRole) return;
+    if (!activeRoles.contains(myRole)) return;
 
     setState(() {
       if (casaSelecionada == null) {
@@ -225,7 +222,6 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
         bool ehValida = movimentosValidos.any((m) => m.startsWith(jogadaBase));
         
         if (ehValida) {
-          // Lógica de pegar a letra da peça
           int col = casaSelecionada!.codeUnitAt(0) - 97;
           int row = 8 - int.parse(casaSelecionada![1]);
           String peca = gerarListaDoTabuleiro()[row * 8 + col];
@@ -251,18 +247,21 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
 
     if (playerCount < maxPlayers) {
       return Scaffold(
-        appBar: AppBar(title: Text('Aguardando Jogadores ($playerCount/$maxPlayers)')),
+        backgroundColor: const Color(0xFF161512),
+        appBar: AppBar(backgroundColor: const Color(0xFF262421),title: Text('Lobby ${widget.mode} - Aguardando ($playerCount/$maxPlayers)')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     bool souEquipePretas = myRole != null && myRole!.startsWith('b');
     
-    // 👉 MONTA AS FILEIRAS DEPENDENDO DO MODO E DA SUA COR
     List<Widget> topRow = [];
     List<Widget> bottomRow = [];
 
-    if (widget.mode == "2v2") {
+    if (widget.mode == "3v3") {
+      topRow = souEquipePretas ? [_buildPlayerBadge('w1'), _buildPlayerBadge('w2'), _buildPlayerBadge('w3')] : [_buildPlayerBadge('b1'), _buildPlayerBadge('b2'), _buildPlayerBadge('b3')];
+      bottomRow = souEquipePretas ? [_buildPlayerBadge('b1'), _buildPlayerBadge('b2'), _buildPlayerBadge('b3')] : [_buildPlayerBadge('w1'), _buildPlayerBadge('w2'), _buildPlayerBadge('w3')];
+    } else if (widget.mode == "2v2") {
       topRow = souEquipePretas ? [_buildPlayerBadge('w1'), _buildPlayerBadge('w2')] : [_buildPlayerBadge('b1'), _buildPlayerBadge('b2')];
       bottomRow = souEquipePretas ? [_buildPlayerBadge('b1'), _buildPlayerBadge('b2')] : [_buildPlayerBadge('w1'), _buildPlayerBadge('w2')];
     } else {
@@ -270,28 +269,76 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       bottomRow = souEquipePretas ? [_buildPlayerBadge('b1')] : [_buildPlayerBadge('w1')];
     }
 
+    // 👉 LÓGICA DINÂMICA DO PAINEL DE DESEMPATE
+    Widget painelDesempate = const SizedBox.shrink();
+    String lanceA = "";
+    String lanceB = "";
+
+    if (widget.mode == "3v3" && myRole != null && activeRoles.contains(myRole)) {
+      // Procura apenas as propostas da MINHA equipa
+      List<MapEntry<String, dynamic>> votosDaEquipa = proposedMoves.entries
+          .where((e) => e.key.startsWith(myRole![0]) && e.value.toString().length >= 4 && e.value != "voted")
+          .toList();
+
+      if (votosDaEquipa.length == 2 && votosDaEquipa[0].value != votosDaEquipa[1].value) {
+        String nomeA = jogadoresConectados[votosDaEquipa[0].key] ?? "Jogador 1";
+        String nomeB = jogadoresConectados[votosDaEquipa[1].key] ?? "Jogador 2";
+        lanceA = votosDaEquipa[0].value;
+        lanceB = votosDaEquipa[1].value;
+
+        painelDesempate = Container(
+          margin: const EdgeInsets.only(bottom: 15),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.deepOrange)),
+          child: Column(
+            children: [
+              const Text("🚨 IMPASSE DETECTADO!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+              const Text("Escolha qual dos lances aliados deve ser jogado:"),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                    onPressed: () => _channel.sink.add(jsonEncode({"move": lanceA})),
+                    child: Text("$nomeA: $lanceA"),
+                  ),
+                  const SizedBox(width: 15),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
+                    onPressed: () => _channel.sink.add(jsonEncode({"move": lanceB})),
+                    child: Text("$nomeB: $lanceB"),
+                  ),
+                ],
+              )
+            ],
+          ),
+        );
+      }
+    }
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.mode == "2v2" ? "Modo Duplas - Sala: ${widget.roomCode}" : "1v1 - Sala: ${widget.roomCode}")),
+      backgroundColor: const Color(0xFF161512),
+      appBar: AppBar(backgroundColor: const Color(0xFF262421),title: Text("Sala ${widget.mode}: ${widget.roomCode}")),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // BARRA DO TOPO (Adversários)
             Row(mainAxisAlignment: MainAxisAlignment.center, children: topRow),
+            const SizedBox(height: 15),
 
-            const SizedBox(height: 20),
+            // O Painel aparece mesmo por cima do tabuleiro
+            painelDesempate,
 
             SizedBox(
-              width: 400,
-              height: 400,
+              width: 400, height: 400,
               child: GridView.builder(
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: 64,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 8),
                 itemBuilder: (context, index) {
                   int boardIndex = souEquipePretas ? 63 - index : index;
-                  int linha = boardIndex ~/ 8;
-                  int coluna = boardIndex % 8;
+                  int linha = boardIndex ~/ 8; int coluna = boardIndex % 8;
                   
                   String pecaFen = casasVisuais[boardIndex];
                   String nomeDaCasa = '${String.fromCharCode(97 + coluna)}${8 - linha}'; 
@@ -302,26 +349,33 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
                     ehDestinoValido = movimentosValidos.any((m) => m.startsWith(casaSelecionada!) && m.substring(2, 4) == nomeDaCasa);
                   }
 
-                  Color corDaCasa = estaSelecionada ? Colors.yellow.withOpacity(0.7) 
-                      : ehDestinoValido ? Colors.green.withOpacity(0.6) 
-                      : (linha + coluna) % 2 == 0 ? Colors.brown[200]! : Colors.brown[600]!;
+                  // 👉 ILUMINAÇÃO TÁTICA DAS CASAS NO TABULEIRO PARA O DESEMPATE
+                  bool casaDoLanceA = lanceA.isNotEmpty && (lanceA.startsWith(nomeDaCasa) || lanceA.substring(2,4) == nomeDaCasa);
+                  bool casaDoLanceB = lanceB.isNotEmpty && (lanceB.startsWith(nomeDaCasa) || lanceB.substring(2,4) == nomeDaCasa);
+
+                  Color corDaCasa;
+                  if (casaDoLanceA) {
+                    corDaCasa = Colors.blue.withOpacity(0.6); // Destaca o Lance A a Azul
+                  } else if (casaDoLanceB) {
+                    corDaCasa = Colors.purple.withOpacity(0.6); // Destaca o Lance B a Roxo
+                  } else if (estaSelecionada) {
+                    corDaCasa = Colors.yellow.withOpacity(0.7);
+                  } else if (ehDestinoValido) {
+                    corDaCasa = Colors.green.withOpacity(0.6);
+                  } else {
+                    corDaCasa = (linha + coluna) % 2 == 0 ? Colors.brown[200]! : Colors.brown[600]!;
+                  }
 
                   return GestureDetector(
                     onTap: () => _aoClicarNaCasa(nomeDaCasa),
-                    child: Container(
-                      decoration: BoxDecoration(color: corDaCasa),
-                      child: Center(child: _obterWidgetPeca(pecaFen)),
-                    ),
+                    child: Container(color: corDaCasa, child: Center(child: _obterWidgetPeca(pecaFen))),
                   );
                 },
               ),
             ),
 
-            const SizedBox(height: 20),
-
-            // BARRA DE BAIXO (Você e seu Parceiro)
+            const SizedBox(height: 15),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: bottomRow),
-
           ],
         ),
       ),
@@ -329,8 +383,5 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   }
 
   @override
-  void dispose() {
-    _channel.sink.close();
-    super.dispose();
-  }
+  void dispose() { _channel.sink.close(); super.dispose(); }
 }

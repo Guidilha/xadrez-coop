@@ -1,31 +1,48 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'gamescreen.dart';
-import 'room.dart';
-import 'dart:math';
-import 'match_viewer.dart';	
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
-  runApp(const MyApp());
+// Importe aqui os seus outros ficheiros (room.dart, gamescreen.dart, etc)
+import 'room.dart';
+import 'gamescreen.dart';
+import 'match_viewer.dart';
+
+void main() async {
+  // Garante que o Flutter está inicializado antes de ler dados locais
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 👉 VERIFICA SE ALGUÉM JÁ ESTAVA LOGADO
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  String? savedUsername = prefs.getString('username');
+  
+  // Inicia a aplicação passando o utilizador (se existir)
+  runApp(MyApp(savedUsername: savedUsername));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? savedUsername;
+  const MyApp({super.key, this.savedUsername});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Xadrez Multiplayer',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        brightness: Brightness.dark, 
+        scaffoldBackgroundColor: const Color(0xFF161512), 
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF161512), 
+          elevation: 0,
+        ),
         useMaterial3: true,
       ),
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const AuthScreen(),
-        // A rota do dashboard foi removida daqui porque agora ela exige o 'username'
-      },
+      // 👉 SE TIVER NOME SALVO, VAI PRO MENU. SE NÃO, VAI PRO LOGIN.
+      home: savedUsername != null && savedUsername!.isNotEmpty
+          ? MainMenuScreen(username: savedUsername!)
+          : const AuthScreen(),
     );
   }
 }
@@ -38,165 +55,127 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final TextEditingController _userController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
-  String _message = '';
-  bool _isSuccessMessage = false;
+  bool _isLogin = true;
   bool _isLoading = false;
 
-  final String apiUrl = 'https://xadrez-a8qm.onrender.com/api';
-
-  Future<void> _enviarRequisicao(String tipo) async {
-    final String username = _userController.text.trim();
-    final String password = _passwordController.text;
-
-    if (username.isEmpty || password.isEmpty) {
-      _mostrarMensagem('Preencha todos os campos.', false);
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _message = '';
-    });
-
+  Future<void> _submit() async {
+    setState(() => _isLoading = true);
+    String url = _isLogin 
+        ? 'https://xadrez-a8qm.onrender.com/api/login' 
+        : 'https://xadrez-a8qm.onrender.com/api/register';
+    
     try {
       final response = await http.post(
-        Uri.parse('$apiUrl/$tipo'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse(url),
+        headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          'username': username,
-          'password': password,
+          "username": _usernameController.text,
+          "password": _passwordController.text,
         }),
       );
 
-      Map<String, dynamic> dados;
-      try {
-        dados = jsonDecode(response.body);
-      } catch (e) {
-        dados = {'message': 'Erro ao processar resposta do servidor.'};
-      }
+      if (!mounted) return;
 
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        _mostrarMensagem(dados['message'] ?? 'Erro na requisição.', false);
-        return;
-      }
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        if (_isLogin) {
+          // 👉 SALVA O LOGIN NO TELEMÓVEL/NAVEGADOR!
+          SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setString('username', _usernameController.text);
 
-      if (tipo == 'login') {
-        if (mounted) {
-          // 👉 AQUI A MÁGICA ACONTECE: O nome do login é enviado para o Menu!
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (context) => MainMenuScreen(username: username),
-            ),
+            MaterialPageRoute(builder: (context) => MainMenuScreen(username: _usernameController.text)),
           );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registrado com sucesso! Faça login.')));
+          setState(() => _isLogin = true);
         }
       } else {
-        _mostrarMensagem('Cadastro realizado! Agora clique em Entrar.', true);
+        final errorData = jsonDecode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorData['message'] ?? 'Erro desconhecido')));
       }
     } catch (e) {
-      _mostrarMensagem('Não foi possível conectar ao servidor.', false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro de conexão: $e')));
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  void _mostrarMensagem(String msg, bool isSuccess) {
-    setState(() {
-      _message = msg;
-      _isSuccessMessage = isSuccess;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFF161512), // Fundo escuro Lichess
       body: Center(
         child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
           child: Container(
-            width: 320,
-            padding: const EdgeInsets.all(24),
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ],
+              color: const Color(0xFF262421), // Card cinza escuro Lichess
+              borderRadius: BorderRadius.circular(4),
+              boxShadow: const [BoxShadow(color: Colors.black26, offset: Offset(0, 4), blurRadius: 4)],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Acessar Sistema',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                Text(
+                  _isLogin ? 'Entrar' : 'Registrar',
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 32),
                 TextField(
-                  controller: _userController,
-                  decoration: const InputDecoration(
+                  controller: _usernameController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
                     labelText: 'Usuário',
-                    border: OutlineInputBorder(),
+                    labelStyle: const TextStyle(color: Color(0xFFBABABA)),
+                    enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF363431))),
+                    focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+                    filled: true,
+                    fillColor: const Color(0xFF161512), // Fundo do Input mais escuro
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
                   obscureText: true,
-                  decoration: const InputDecoration(
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
                     labelText: 'Senha',
-                    border: OutlineInputBorder(),
+                    labelStyle: const TextStyle(color: Color(0xFFBABABA)),
+                    enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF363431))),
+                    focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+                    filled: true,
+                    fillColor: const Color(0xFF161512),
                   ),
                 ),
-                const SizedBox(height: 20),
-                if (_isLoading)
-                  const CircularProgressIndicator()
-                else ...[
-                  SizedBox(
-                    width: double.infinity,
-                    height: 45,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
+                const SizedBox(height: 24),
+                _isLoading
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF363431),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          ),
+                          onPressed: _submit,
+                          child: Text(_isLogin ? 'ENTRAR' : 'CRIAR CONTA', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ),
                       ),
-                      onPressed: () => _enviarRequisicao('login'),
-                      child: const Text('Entrar', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => setState(() => _isLogin = !_isLogin),
+                  child: Text(
+                    _isLogin ? 'Não tem uma conta? Registre-se' : 'Já tem conta? Faça login',
+                    style: const TextStyle(color: Color(0xFFBABABA)),
                   ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 45,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () => _enviarRequisicao('register'),
-                      child: const Text('Cadastrar Novo', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
-                if (_message.isNotEmpty) ...[
-                  const SizedBox(height: 15),
-                  Text(
-                    _message,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _isSuccessMessage ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ]
+                ),
               ],
             ),
           ),
@@ -209,9 +188,7 @@ class _AuthScreenState extends State<AuthScreen> {
 enum GameMode { umContraUm, doisContraDois, tresContraTres, contraIA }
 
 class MainMenuScreen extends StatefulWidget {
-  // 👉 1. O Menu agora exige receber o username
   final String username;
-  
   const MainMenuScreen({super.key, required this.username});
 
   @override
@@ -219,17 +196,215 @@ class MainMenuScreen extends StatefulWidget {
 }
 
 class _MainMenuScreenState extends State<MainMenuScreen> {
-  int _currentTab = 0;
   GameMode _selectedMode = GameMode.umContraUm;
-  
-  // Variáveis para guardar o histórico
+
+  Future<void> _escolherEquipeEEntrar(BuildContext context, String codigo, String modo, String username) async {
+    String? equipeEscolhida = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF262421), // Cor dos painéis do Lichess
+        title: const Text('Escolha sua Equipe', textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
+        content: const Text('Em qual lado do tabuleiro você deseja jogar?', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFBABABA))),
+        actionsAlignment: MainAxisAlignment.spaceEvenly,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(context, 'w'), 
+            child: const Text('Brancas', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
+            onPressed: () => Navigator.pop(context, 'b'), 
+            child: const Text('Pretas', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (equipeEscolhida != null) {
+      if (!context.mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChessBoardScreen(
+            roomCode: codigo,
+            username: username,
+            mode: modo,
+            team: equipeEscolhida, 
+          ),
+        ),
+      );
+    }
+  }
+
+  void _handleAction(String acao) {
+    String modoParaOGo = "1v1";
+    if (_selectedMode == GameMode.doisContraDois) modoParaOGo = "2v2";
+    if (_selectedMode == GameMode.tresContraTres) modoParaOGo = "3v3";
+
+    if (acao == 'criar') {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      final random = Random();
+      String novoCodigo = String.fromCharCodes(Iterable.generate(
+          4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
+
+      _escolherEquipeEEntrar(context, novoCodigo, modoParaOGo, widget.username);
+    } else if (acao == 'entrar') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => JoinRoomScreen(username: widget.username, mode: modoParaOGo)),
+      );
+    } else if (acao == 'historico') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => HistoryScreen(username: widget.username)),
+      );
+    }
+  }
+
+  // 👉 BOTÕES DO GRID (Estilo Lichess)
+  Widget _buildModeButton(String title, String subtitle, GameMode mode) {
+    bool isSelected = _selectedMode == mode;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedMode = mode),
+      child: Container(
+        width: 130, // Largura dos blocos
+        height: 110,
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF363431) : const Color(0xFF262421), // Fica mais claro se selecionado
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: isSelected ? Colors.blueGrey : Colors.transparent, width: 2),
+          boxShadow: const [BoxShadow(color: Colors.black26, offset: Offset(0, 4), blurRadius: 4)],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 6),
+            Text(subtitle, style: const TextStyle(fontSize: 14, color: Color(0xFFBABABA))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 👉 BOTÕES DE AÇÃO LATERAIS (Estilo Lichess)
+  Widget _buildActionButton(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF262421), // Cinza botão do lichess
+          borderRadius: BorderRadius.circular(4),
+          boxShadow: const [BoxShadow(color: Colors.black26, offset: Offset(0, 4), blurRadius: 4)],
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFBABABA), size: 28),
+            const SizedBox(width: 16),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool isWide = MediaQuery.of(context).size.width > 600;
+
+    Widget modesGrid = Wrap(
+      spacing: 12, runSpacing: 12, alignment: WrapAlignment.center,
+      children: [
+        _buildModeButton('1v1', 'Clássico', GameMode.umContraUm),
+        _buildModeButton('2v2', 'Duplas', GameMode.doisContraDois),
+        _buildModeButton('3v3', 'Conselho', GameMode.tresContraTres),
+      ],
+    );
+
+    Widget actionButtons = Column(
+      children: [
+        _buildActionButton(Icons.group_add, 'Criar partida na sala', () => _handleAction('criar')),
+        _buildActionButton(Icons.list_alt, 'Lista de salas abertas', () => _handleAction('entrar')),
+        _buildActionButton(Icons.history, 'Histórico de partidas', () => _handleAction('historico')),
+      ],
+    );
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF161512),
+      appBar: AppBar(
+        // 👉 CORRIGIDO O TÍTULO AQUI:
+        title: const Text('Xadrez Multiplayer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.white)),
+        actions: [
+          Center(child: Padding(padding: const EdgeInsets.only(right: 16), child: Text(widget.username, style: const TextStyle(color: Color(0xFFBABABA), fontSize: 16)))),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Color(0xFFBABABA)), 
+            onPressed: () async {
+              // 👉 APAGA O LOGIN SALVO QUANDO O UTILIZADOR SAI
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              await prefs.remove('username');
+              
+              if (!context.mounted) return;
+              Navigator.pushReplacement(
+                context, 
+                MaterialPageRoute(builder: (context) => const AuthScreen())
+              );
+            }
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: isWide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 3, child: modesGrid), 
+                      const SizedBox(width: 40),
+                      Expanded(flex: 2, child: actionButtons), 
+                    ],
+                  )
+                : Column(
+                    children: [
+                      modesGrid,
+                      const SizedBox(height: 40),
+                      actionButtons,
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 👉 A NOVA TELA DE HISTÓRICO DEDICADA!
+// ============================================================================
+
+class HistoryScreen extends StatefulWidget {
+  final String username;
+  const HistoryScreen({super.key, required this.username});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
   List<Map<String, dynamic>> _historico = [];
   bool _isLoadingHistory = true;
 
   @override
   void initState() {
     super.initState();
-    _buscarHistorico(); // Busca as partidas assim que logar
+    _buscarHistorico();
   }
 
   Future<void> _buscarHistorico() async {
@@ -250,247 +425,95 @@ class _MainMenuScreenState extends State<MainMenuScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFF161512),
       appBar: AppBar(
-        title: Text('Olá, ${widget.username}!', style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sair',
-            onPressed: () => Navigator.pushReplacementNamed(context, '/'),
-          ),
-        ],
+        title: const Text('Histórico de Partidas', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF262421), // AppBar levemente destacada
+        iconTheme: const IconThemeData(color: Color(0xFFBABABA)), // Seta de voltar cinza
       ),
-      body: _currentTab == 0 ? _buildPlayTab() : _buildHistoryTab(),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentTab,
-        onTap: (index) {
-          setState(() => _currentTab = index);
-          if (index == 1) {
-            setState(() => _isLoadingHistory = true);
-            _buscarHistorico(); // Atualiza o histórico ao clicar na aba
-          }
-        },
-        selectedItemColor: Colors.blue,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.play_arrow), label: 'Jogar'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Histórico'),
-        ],
-      ),
+      body: _buildHistoryContent(),
     );
   }
 
-  Widget _buildPlayTab() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 600),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Selecione o Modo de Jogo',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 24),
-              _buildModeSelector(),
-              const SizedBox(height: 40),
-              SizedBox(
-                height: 50,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                  icon: const Icon(Icons.add_box),
-                  label: const Text('Criar Nova Sala', style: TextStyle(fontSize: 16)),
-                  onPressed: () => _handleAction('criar'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 50,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.blue,
-                    side: const BorderSide(color: Colors.blue),
-                  ),
-                  icon: const Icon(Icons.login),
-                  label: const Text('Entrar em uma Sala', style: TextStyle(fontSize: 16)),
-                  onPressed: () => _handleAction('entrar'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModeSelector() {
-    return Center(
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SegmentedButton<GameMode>(
-          segments: const [
-            ButtonSegment(value: GameMode.umContraUm, label: Text('1v1')),
-            ButtonSegment(value: GameMode.doisContraDois, label: Text('2v2')),
-            ButtonSegment(value: GameMode.tresContraTres, label: Text('3v3')),
-            ButtonSegment(value: GameMode.contraIA, label: Text('VS IA')),
-          ],
-          selected: {_selectedMode},
-          onSelectionChanged: (Set<GameMode> selection) {
-            setState(() => _selectedMode = selection.first);
-          },
-          style: ButtonStyle(
-            padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 12)),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHistoryTab() {
-    if (_isLoadingHistory) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_historico.isEmpty) {
-      return const Center(
-        child: Text('Nenhuma partida encontrada.', style: TextStyle(fontSize: 16, color: Colors.grey)),
-      );
-    }
+  Widget _buildHistoryContent() {
+    if (_isLoadingHistory) return const Center(child: CircularProgressIndicator(color: Colors.white));
+    if (_historico.isEmpty) return const Center(child: Text('Nenhuma partida encontrada.', style: TextStyle(fontSize: 16, color: Color(0xFFBABABA))));
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _historico.length,
       itemBuilder: (context, index) {
         final partida = _historico[index];
-        
         String status = partida['status'] ?? '*';
-        bool? isWin;
+        String modo = partida['mode'] ?? '1v1';
         
-        if (status == '1-0') {
-          isWin = (partida['white_name'] == widget.username);
-        } else if (status == '0-1') {
-          isWin = (partida['black_name'] == widget.username);
-        } else if (status == '1/2-1/2') {
-          isWin = null; 
+        List<String> brancas = []; List<String> pretas = [];
+
+        void addIfValid(String? name, List<String> team) {
+          if (name != null && name.trim().isNotEmpty && name != "Aguardando..." && name != "Desconhecido") team.add(name);
         }
 
-        Color iconColor = Colors.grey;
+        addIfValid(partida['white_name'], brancas); addIfValid(partida['w2_name'], brancas); addIfValid(partida['w3_name'], brancas);
+        addIfValid(partida['black_name'], pretas); addIfValid(partida['b2_name'], pretas); addIfValid(partida['b3_name'], pretas);
+
+        String strBrancas = brancas.isEmpty ? "Brancas" : brancas.join(", ");
+        String strPretas = pretas.isEmpty ? "Pretas" : pretas.join(", ");
+
+        bool isWhiteTeam = brancas.contains(widget.username);
+        bool isBlackTeam = pretas.contains(widget.username);
+        bool? isWin;
+        
+        if (status == '1-0') isWin = isWhiteTeam ? true : (isBlackTeam ? false : null);
+        else if (status == '0-1') isWin = isBlackTeam ? true : (isWhiteTeam ? false : null);
+        else if (status == '1/2-1/2') isWin = null; 
+
+        Color iconColor = const Color(0xFFBABABA);
         IconData iconData = Icons.schedule; 
         String textoResultado = "Em Andamento";
 
-        if (isWin == true) {
-          iconColor = Colors.green;
-          iconData = Icons.emoji_events;
-          textoResultado = "Vitória";
-        } else if (isWin == false) {
-          iconColor = Colors.red;
-          iconData = Icons.cancel;
-          textoResultado = "Derrota";
-        } else if (status == '1/2-1/2') {
-          iconColor = Colors.orange;
-          iconData = Icons.handshake;
-          textoResultado = "Empate";
-        }
+        // Cores de Vitória/Derrota ajustadas para o Dark Theme
+        if (isWin == true) { iconColor = Colors.green[400]!; iconData = Icons.emoji_events; textoResultado = "Vitória"; }
+        else if (isWin == false) { iconColor = Colors.red[400]!; iconData = Icons.cancel; textoResultado = "Derrota"; }
+        else if (status == '1/2-1/2') { iconColor = Colors.orange[400]!; iconData = Icons.handshake; textoResultado = "Empate"; }
 
-        String adversario = (partida['white_name'] == widget.username) 
-            ? partida['black_name'] 
-            : partida['white_name'];
-
-        // 👉 AQUI ESTÁ O GESTURE DETECTOR ENVOLVENDO O CARD!
         return GestureDetector(
           onTap: () {
-            // Só abre o replay se a partida tiver lances salvos
             List<String> lances = List<String>.from(partida['moves'] ?? []);
             if (lances.isNotEmpty) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => MatchViewerScreen(
-                    moves: lances,
-                    whiteName: partida['white_name'],
-                    blackName: partida['black_name'],
-                  ),
-                ),
-              );
+              Navigator.push(context, MaterialPageRoute(builder: (context) => MatchViewerScreen(moves: lances, whiteName: strBrancas, blackName: strPretas)));
             } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Esta partida não possui lances gravados.')),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Partida sem lances gravados.', style: TextStyle(color: Colors.white))));
             }
           },
           child: Card(
-            elevation: 2,
+            color: const Color(0xFF262421), // Cor de Card do Lichess
+            elevation: 4,
             margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: iconColor.withOpacity(0.2),
-                child: Icon(iconData, color: iconColor),
-              ),
-              title: Text('VS $adversario', style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('Data: ${partida['date'] ?? "Hoje"}'),
-              trailing: Text(
-                textoResultado,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: iconColor),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: ListTile(
+                leading: CircleAvatar(backgroundColor: iconColor.withOpacity(0.15), child: Icon(iconData, color: iconColor)),
+                title: Text('Modo $modo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 6),
+                    Text('⚪ $strBrancas', style: const TextStyle(color: Color(0xFFBABABA))),
+                    const SizedBox(height: 2),
+                    Text('⚫ $strPretas', style: const TextStyle(color: Color(0xFFBABABA))),
+                    const SizedBox(height: 6),
+                    Text('Data: ${partida['date'] ?? "Hoje"}', style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF888888))),
+                  ],
+                ),
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [Text(textoResultado, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: iconColor))],
+                ),
               ),
             ),
           ),
         );
       },
     );
-  }
-  void _handleAction(String acao) {
-    String modoParaOGo = _selectedMode == GameMode.doisContraDois ? "2v2" : "1v1";		
-    if (acao == 'criar') {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      final random = Random();
-      String novoCodigo = String.fromCharCodes(Iterable.generate(
-          4, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
-
-      // Transforma o Enum no texto que o Servidor Go espera
-      
-      
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChessBoardScreen(
-            roomCode: novoCodigo,
-            username: widget.username,
-            mode: modoParaOGo,
-          ),
-        ),
-      );
-    } else if (acao == 'entrar') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => JoinRoomScreen(
-            username: widget.username,
-            mode: modoParaOGo,
-          ),
-        ),
-      );
-    }
   }
 }
