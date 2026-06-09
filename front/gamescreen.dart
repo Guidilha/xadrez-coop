@@ -18,6 +18,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   late WebSocketChannel _channel;
   
   String currentFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"; 
+  String? lastFen; 
+  String gameStatus = "*"; 
   String? casaSelecionada;
   List<String> movimentosValidos = [];
   bool isDialogOpen = false; 
@@ -31,10 +33,14 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
 
   List<String> activeRoles = ['w1']; 
   Map<String, dynamic> proposedMoves = {}; 
+  String drawOffer = ""; 
+  
+  bool localDrawOffered = false; 
 
   @override
   void initState() {
     super.initState();
+
     _channel = WebSocketChannel.connect(
       Uri.parse('wss://xadrez-a8qm.onrender.com/ws/play?room=${widget.roomCode}&user=${widget.username}&mode=${widget.mode}&team=${widget.team}')
     );
@@ -49,29 +55,56 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       
       setState(() {
         currentFen = data['fen'];
+        gameStatus = data['status'] ?? '*';
         playerCount = data['player_count']; 
         maxPlayers = data['max_players'] ?? 2;
         movimentosValidos = List<String>.from(data['valid_moves'] ?? []);
         rematchVotes = data['rematch_votes'] ?? 0;
         jogadoresConectados = data['players'] ?? {};
-        
         activeRoles = List<String>.from(data['active_roles'] ?? ['w1']);
         proposedMoves = data['proposed_moves'] ?? {};
-        casaSelecionada = null; 
-
-        if (myRole == null && jogadoresConectados.containsValue(widget.username)) {
+        
+        if (myRole == null) {
           jogadoresConectados.forEach((cargo, nome) {
-            if (nome == widget.username) myRole = cargo;
+            if (nome == widget.username && cargo.startsWith(widget.team)) myRole = cargo;
           });
+          if (myRole == null && jogadoresConectados.containsValue(widget.username)) {
+            jogadoresConectados.forEach((cargo, nome) { if (nome == widget.username) myRole = cargo; });
+          }
         }
+
+        String novoDrawOffer = data['draw_offer'] ?? ""; 
+
+        if (gameStatus != '*') {
+          localDrawOffered = false;
+          drawOffer = "";
+          novoDrawOffer = "";
+        } else {
+          bool moveHappened = false;
+          if (lastFen != null && lastFen != currentFen) moveHappened = true; 
+          lastFen = currentFen; 
+
+          if (moveHappened) localDrawOffered = false;
+
+          if (myRole != null && novoDrawOffer == myRole![0]) {
+             localDrawOffered = true;
+          }
+
+          if (myRole != null && novoDrawOffer.isNotEmpty && novoDrawOffer != myRole![0]) {
+             localDrawOffered = false; 
+             // 👉 O SnackBar extravagante foi removido daqui!
+          }
+        }
+
+        drawOffer = novoDrawOffer; 
+        casaSelecionada = null; 
       });
 
-      String status = data['status'] ?? '*';
-      if (status != '*') {
-        if (!isDialogOpen) _mostrarFimDeJogo(status); 
+      if (gameStatus != '*') {
+        if (!isDialogOpen) _mostrarFimDeJogo(gameStatus); 
         else {
           Navigator.of(context).pop(); isDialogOpen = false;
-          _mostrarFimDeJogo(status); 
+          _mostrarFimDeJogo(gameStatus); 
         }
       } else {
         if (isDialogOpen) { Navigator.pop(context); isDialogOpen = false; }
@@ -85,8 +118,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     isDialogOpen = true;
 
     String mensagem = "O jogo terminou em empate!";
-    if (resultado == "1-0") mensagem = "Xeque-Mate!\nAs Brancas Venceram!";
-    else if (resultado == "0-1") mensagem = "Xeque-Mate!\nAs Pretas Venceram!";
+    if (resultado == "1-0") mensagem = "Fim de Jogo!\nAs Brancas Venceram!";
+    else if (resultado == "0-1") mensagem = "Fim de Jogo!\nAs Pretas Venceram!";
 
     Widget rematchWidget = euPediRevanche 
         ? const Text("Aguardando votos...", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
@@ -103,8 +136,9 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       context: context,
       barrierDismissible: false, 
       builder: (context) => AlertDialog(
-        title: const Text("Fim de Jogo!", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text(mensagem, style: const TextStyle(fontSize: 18), textAlign: TextAlign.center),
+        backgroundColor: const Color(0xFF262421),
+        title: const Text("Resultado", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        content: Text(mensagem, style: const TextStyle(fontSize: 18, color: Color(0xFFBABABA)), textAlign: TextAlign.center),
         actions: [
           rematchWidget,
           TextButton(
@@ -113,6 +147,28 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
             },
             child: const Text("Sair da Sala", style: TextStyle(color: Colors.red)),
           )
+        ],
+      ),
+    );
+  }
+
+  void _confirmResign() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF262421),
+        title: const Text("Render-se", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text("Tem a certeza que deseja desistir da partida?", style: TextStyle(color: Color(0xFFBABABA))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red[800], foregroundColor: Colors.white),
+            onPressed: () {
+              _channel.sink.add(jsonEncode({"move": "resign"}));
+              Navigator.pop(context);
+            },
+            child: const Text("Sim, Render-se"),
+          ),
         ],
       ),
     );
@@ -196,14 +252,15 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     return showDialog<String>(
       context: context, barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Promover Peão'),
+        backgroundColor: const Color(0xFF262421),
+        title: const Text('Promover Peão', style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(q)), title: const Text('Rainha'), onTap: () => Navigator.pop(context, 'q')),
-            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(r)), title: const Text('Torre'), onTap: () => Navigator.pop(context, 'r')),
-            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(b)), title: const Text('Bispo'), onTap: () => Navigator.pop(context, 'b')),
-            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(n)), title: const Text('Cavalo'), onTap: () => Navigator.pop(context, 'n')),
+            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(q)), title: const Text('Rainha', style: TextStyle(color: Colors.white)), onTap: () => Navigator.pop(context, 'q')),
+            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(r)), title: const Text('Torre', style: TextStyle(color: Colors.white)), onTap: () => Navigator.pop(context, 'r')),
+            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(b)), title: const Text('Bispo', style: TextStyle(color: Colors.white)), onTap: () => Navigator.pop(context, 'b')),
+            ListTile(leading: SizedBox(width: 40, height: 40, child: _obterWidgetPeca(n)), title: const Text('Cavalo', style: TextStyle(color: Colors.white)), onTap: () => Navigator.pop(context, 'n')),
           ],
         ),
       ),
@@ -241,6 +298,87 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     });
   }
 
+  Widget _buildActionToolbar() {
+    if (gameStatus != '*') return const SizedBox.shrink(); 
+    if (myRole == null) return const SizedBox.shrink(); 
+
+    bool myTeamOffered = (drawOffer.isNotEmpty && drawOffer == myRole![0]) || localDrawOffered;
+    bool enemyOffered = drawOffer.isNotEmpty && drawOffer != myRole![0];
+
+    Widget drawButton;
+
+    if (enemyOffered) {
+      // 👉 CENÁRIO A: Botão limpo. Mantém a cor de fundo, texto branco, e ganha um contorno laranja elegante.
+      drawButton = ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF363431), 
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          side: const BorderSide(color: Colors.orangeAccent, width: 2), // O contorno simples!
+        ),
+        icon: const Icon(Icons.handshake, size: 22, color: Colors.orangeAccent),
+        label: const Text("Pedido de Empate 1/2", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        onPressed: () => _channel.sink.add(jsonEncode({"move": "offer_draw"})),
+      );
+    } else if (myTeamOffered) {
+      // 👉 CENÁRIO B: NÓS PEDIMOS EMPATE. 
+      drawButton = ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF262421), 
+          foregroundColor: Colors.grey[400],
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          side: const BorderSide(color: Colors.white12, width: 1),
+        ),
+        icon: const SizedBox(
+          width: 14, height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orangeAccent),
+        ),
+        label: const Text("Pedido Enviado (1/2) ⏳", style: TextStyle(fontWeight: FontWeight.bold)),
+        onPressed: null, 
+      );
+    } else {
+      // 👉 CENÁRIO C: Estado padrão inicial
+      drawButton = ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF363431), 
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        ),
+        icon: const Icon(Icons.handshake),
+        label: const Text("Pedir Empate", style: TextStyle(fontWeight: FontWeight.bold)),
+        onPressed: () {
+          setState(() { localDrawOffered = true; });
+          _channel.sink.add(jsonEncode({"move": "offer_draw"}));
+        },
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 25),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[800], 
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            ),
+            icon: const Icon(Icons.flag),
+            label: const Text("Render-se", style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: _confirmResign,
+          ),
+          const SizedBox(width: 15),
+          drawButton,
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     List<String> casasVisuais = gerarListaDoTabuleiro();
@@ -248,8 +386,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
     if (playerCount < maxPlayers) {
       return Scaffold(
         backgroundColor: const Color(0xFF161512),
-        appBar: AppBar(backgroundColor: const Color(0xFF262421),title: Text('Lobby ${widget.mode} - Aguardando ($playerCount/$maxPlayers)')),
-        body: const Center(child: CircularProgressIndicator()),
+        appBar: AppBar(backgroundColor: const Color(0xFF262421), title: Text('Lobby ${widget.mode} - Aguardando ($playerCount/$maxPlayers)', style: const TextStyle(color: Colors.white))),
+        body: const Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 
@@ -269,22 +407,17 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
       bottomRow = souEquipePretas ? [_buildPlayerBadge('b1')] : [_buildPlayerBadge('w1')];
     }
 
-    // 👉 LÓGICA DINÂMICA DO PAINEL DE DESEMPATE
     Widget painelDesempate = const SizedBox.shrink();
-    String lanceA = "";
-    String lanceB = "";
+    String lanceA = ""; String lanceB = "";
 
     if (widget.mode == "3v3" && myRole != null && activeRoles.contains(myRole)) {
-      // Procura apenas as propostas da MINHA equipa
       List<MapEntry<String, dynamic>> votosDaEquipa = proposedMoves.entries
-          .where((e) => e.key.startsWith(myRole![0]) && e.value.toString().length >= 4 && e.value != "voted")
-          .toList();
+          .where((e) => e.key.startsWith(myRole![0]) && e.value.toString().length >= 4 && e.value != "voted").toList();
 
       if (votosDaEquipa.length == 2 && votosDaEquipa[0].value != votosDaEquipa[1].value) {
         String nomeA = jogadoresConectados[votosDaEquipa[0].key] ?? "Jogador 1";
         String nomeB = jogadoresConectados[votosDaEquipa[1].key] ?? "Jogador 2";
-        lanceA = votosDaEquipa[0].value;
-        lanceB = votosDaEquipa[1].value;
+        lanceA = votosDaEquipa[0].value; lanceB = votosDaEquipa[1].value;
 
         painelDesempate = Container(
           margin: const EdgeInsets.only(bottom: 15),
@@ -293,22 +426,14 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
           child: Column(
             children: [
               const Text("🚨 IMPASSE DETECTADO!", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepOrange)),
-              const Text("Escolha qual dos lances aliados deve ser jogado:"),
+              const Text("Escolha qual dos lances aliados deve ser jogado:", style: TextStyle(color: Colors.white)),
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                    onPressed: () => _channel.sink.add(jsonEncode({"move": lanceA})),
-                    child: Text("$nomeA: $lanceA"),
-                  ),
+                  ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white), onPressed: () => _channel.sink.add(jsonEncode({"move": lanceA})), child: Text("$nomeA: $lanceA")),
                   const SizedBox(width: 15),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
-                    onPressed: () => _channel.sink.add(jsonEncode({"move": lanceB})),
-                    child: Text("$nomeB: $lanceB"),
-                  ),
+                  ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white), onPressed: () => _channel.sink.add(jsonEncode({"move": lanceB})), child: Text("$nomeB: $lanceB")),
                 ],
               )
             ],
@@ -319,7 +444,7 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF161512),
-      appBar: AppBar(backgroundColor: const Color(0xFF262421),title: Text("Sala ${widget.mode}: ${widget.roomCode}")),
+      appBar: AppBar(backgroundColor: const Color(0xFF262421), title: Text("Sala ${widget.mode}: ${widget.roomCode}", style: const TextStyle(color: Colors.white))),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -327,7 +452,6 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
             Row(mainAxisAlignment: MainAxisAlignment.center, children: topRow),
             const SizedBox(height: 15),
 
-            // O Painel aparece mesmo por cima do tabuleiro
             painelDesempate,
 
             SizedBox(
@@ -349,22 +473,15 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
                     ehDestinoValido = movimentosValidos.any((m) => m.startsWith(casaSelecionada!) && m.substring(2, 4) == nomeDaCasa);
                   }
 
-                  // 👉 ILUMINAÇÃO TÁTICA DAS CASAS NO TABULEIRO PARA O DESEMPATE
                   bool casaDoLanceA = lanceA.isNotEmpty && (lanceA.startsWith(nomeDaCasa) || lanceA.substring(2,4) == nomeDaCasa);
                   bool casaDoLanceB = lanceB.isNotEmpty && (lanceB.startsWith(nomeDaCasa) || lanceB.substring(2,4) == nomeDaCasa);
 
                   Color corDaCasa;
-                  if (casaDoLanceA) {
-                    corDaCasa = Colors.blue.withOpacity(0.6); // Destaca o Lance A a Azul
-                  } else if (casaDoLanceB) {
-                    corDaCasa = Colors.purple.withOpacity(0.6); // Destaca o Lance B a Roxo
-                  } else if (estaSelecionada) {
-                    corDaCasa = Colors.yellow.withOpacity(0.7);
-                  } else if (ehDestinoValido) {
-                    corDaCasa = Colors.green.withOpacity(0.6);
-                  } else {
-                    corDaCasa = (linha + coluna) % 2 == 0 ? Colors.brown[200]! : Colors.brown[600]!;
-                  }
+                  if (casaDoLanceA) corDaCasa = Colors.blue.withOpacity(0.6); 
+                  else if (casaDoLanceB) corDaCasa = Colors.purple.withOpacity(0.6); 
+                  else if (estaSelecionada) corDaCasa = Colors.yellow.withOpacity(0.7);
+                  else if (ehDestinoValido) corDaCasa = Colors.green.withOpacity(0.6);
+                  else corDaCasa = (linha + coluna) % 2 == 0 ? Colors.brown[200]! : Colors.brown[600]!;
 
                   return GestureDetector(
                     onTap: () => _aoClicarNaCasa(nomeDaCasa),
@@ -376,6 +493,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
 
             const SizedBox(height: 15),
             Row(mainAxisAlignment: MainAxisAlignment.center, children: bottomRow),
+            
+            _buildActionToolbar(),
           ],
         ),
       ),
@@ -383,5 +502,8 @@ class _ChessBoardScreenState extends State<ChessBoardScreen> {
   }
 
   @override
-  void dispose() { _channel.sink.close(); super.dispose(); }
+  void dispose() { 
+    _channel.sink.close(); 
+    super.dispose(); 
+  }
 }
